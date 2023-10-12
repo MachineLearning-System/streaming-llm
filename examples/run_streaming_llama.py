@@ -58,6 +58,57 @@ def greedy_generate(model, tokenizer, input_ids, past_key_values, max_gen_len):
 
 
 @torch.no_grad()
+def block_generate(model, tokenizer, input_ids, past_key_values, max_gen_len, block_len, cache_manager):
+    outputs = model(
+        input_ids=input_ids,
+        past_key_values=past_key_values,
+        use_cache=True,
+    )
+    past_key_values = outputs.past_key_values
+    pred_token_idx = outputs.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
+    generated_ids = [pred_token_idx.item()]
+
+    num_token = 0
+    pos = 0
+    for _ in range(max_gen_len - 1):
+        # 输入1 token + kv cache
+        outputs = model(
+            input_ids=pred_token_idx,
+            past_key_values=past_key_values,
+            use_cache=True,
+        )
+        past_key_values = outputs.past_key_values
+        pred_token_idx = outputs.logits[:, -1, :].argmax(dim=-1).unsqueeze(1)
+        generated_ids.append(pred_token_idx.item())
+        generated_text = (
+            tokenizer.decode(
+                generated_ids,
+                skip_special_tokens=True,
+                clean_up_tokenization_spaces=True,
+                spaces_between_special_tokens=False,
+            )
+            .strip()
+            .split(" ")
+        )
+
+        now = len(generated_text)
+        if now > pos:
+            print(" ".join(generated_text[pos:now]), end=" ",flush=True)
+            num_token += 1
+            pos = now
+
+        if pred_token_idx == tokenizer.eos_token_id:
+            break
+
+        if num_token == block_len:
+            num_token = 0
+            print("==")
+            past_key_values = cache_manager.evict_for_space(past_key_values, block_len)
+
+    print(" ".join(generated_text[pos:]), flush=True)
+    return past_key_values
+
+@torch.no_grad()
 def streaming_inference(model, tokenizer, prompts, kv_cache=None, max_gen_len=1000):
     past_key_values = None
     for idx, prompt in enumerate(prompts):
@@ -73,6 +124,11 @@ def streaming_inference(model, tokenizer, prompts, kv_cache=None, max_gen_len=10
         past_key_values = greedy_generate(
             model, tokenizer, input_ids, past_key_values, max_gen_len=max_gen_len
         )
+        # past_key_values = block_generate(
+        #     model, tokenizer, input_ids, past_key_values, max_gen_len=max_gen_len,
+        #     block_len=100, cache_manager=kv_cache,
+        # )
+
 
 
 def main(args):
@@ -105,13 +161,14 @@ def main(args):
         tokenizer,
         prompts,
         kv_cache,
+        max_gen_len=50000,
     )
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--model_name_or_path", type=str, default="lmsys/vicuna-13b-v1.3"
+        "--model_name_or_path", type=str, default="meta-llama/Llama-2-7b-chat-hf"
     )
     parser.add_argument("--data_root", type=str, default="data/")
     parser.add_argument("--enable_streaming", action="store_true")

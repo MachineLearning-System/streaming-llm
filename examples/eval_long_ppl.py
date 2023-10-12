@@ -68,13 +68,28 @@ os.makedirs(args.output_dir, exist_ok=True)
 f = open(f"{args.output_dir}/log.txt", "w")
 
 num_eval_tokens = 0
-for text in data["text"][: args.num_samples]:
+print(data)
+
+############ M
+
+test_filepath = os.path.join("data/", "mt_bench.jsonl")
+list_data = load_jsonl(test_filepath)
+prompts = []
+for sample in list_data:
+    prompts += sample["turns"]
+
+for text in prompts:
+# for text in data["text"][: args.num_samples]:
+############ M
     encodings = tokenizer(text, return_tensors="pt")
 
     print(encodings.input_ids[:, :10])
 
     seq_len = encodings.input_ids.size(1)
     print(f"seq_len: {seq_len}")
+    if seq_len >= 90:
+        break;
+
     pbar = tqdm(range(0, seq_len - 1))
 
     for idx in pbar:
@@ -104,6 +119,8 @@ for text in data["text"][: args.num_samples]:
 
 f.close()
 
+# nill for neg_log_likelihood
+# ppl for Perplexities
 ppl = torch.exp(torch.stack(nlls).mean())
 print(ppl.item())
 with open(f"{args.output_dir}/ppl.txt", "w") as f:
